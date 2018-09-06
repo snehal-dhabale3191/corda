@@ -77,7 +77,7 @@ interface NodeConfiguration {
 
     val baseDirectory: Path
     val certificatesDirectory: Path
-    val signingCertificateStore: FileBasedCertificateStoreSupplier
+    val  signingCertificateStore: FileBasedCertificateStoreSupplier
     val p2pSslOptions: MutualSslConfiguration
 
     val cordappDirectories: List<Path>

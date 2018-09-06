@@ -30,6 +30,7 @@ import net.corda.core.serialization.SerializationWhitelist
 import net.corda.core.serialization.SerializeAsToken
 import net.corda.core.serialization.SingletonSerializeAsToken
 import net.corda.core.utilities.*
+import net.corda.cryptoservice.CryptoService
 import net.corda.node.CordaClock
 import net.corda.node.VersionInfo
 import net.corda.node.cordapp.CordappLoader
