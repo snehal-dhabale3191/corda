@@ -3,7 +3,6 @@ package net.corda.node.internal
 import net.corda.core.crypto.SecureHash
 import net.corda.core.flows.FlowLogic
 import net.corda.core.flows.FlowSession
-import net.corda.core.internal.VisibleForTesting
 import net.corda.core.utilities.contextLogger
 import net.corda.core.utilities.debug
 import net.corda.node.services.statemachine.StateMachineManager
@@ -51,7 +50,6 @@ class FlowManager {
 
     }
 
-    @VisibleForTesting
     fun installCoreFlow(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>? = null) {
         require(clientFlowClass.java.flowVersionAndInitiatingClass.first == 1) {
             "${InitiatingFlow::class.java.name}.version not applicable for core flows; their version is the node's platform version"
