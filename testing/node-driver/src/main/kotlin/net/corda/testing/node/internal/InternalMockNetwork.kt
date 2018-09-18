@@ -280,12 +280,14 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
         }
     }
 
-    open class MockNode(args: MockNodeArgs, cordappLoader: CordappLoader = JarScanningCordappLoader.fromDirectories(args.config.cordappDirectories)) : AbstractNode<TestStartedNode>(
+    open class MockNode(args: MockNodeArgs,
+                        cordappLoader: CordappLoader = JarScanningCordappLoader.fromDirectories(args.config.cordappDirectories),
+                        flowManager: FlowManager = FlowManager()) : AbstractNode<TestStartedNode>(
             args.config,
             TestClock(Clock.systemUTC()),
             args.version,
             cordappLoader,
-            FlowManager(),
+            flowManager,
             args.network.getServerThread(args.id),
             args.network.busyLatch
     ) {
