@@ -29,7 +29,10 @@ import net.corda.core.schemas.MappedSchema
 import net.corda.core.serialization.SerializationWhitelist
 import net.corda.core.serialization.SerializeAsToken
 import net.corda.core.serialization.SingletonSerializeAsToken
-import net.corda.core.utilities.*
+import net.corda.core.utilities.NetworkHostAndPort
+import net.corda.core.utilities.days
+import net.corda.core.utilities.getOrThrow
+import net.corda.core.utilities.minutes
 import net.corda.node.CordaClock
 import net.corda.node.VersionInfo
 import net.corda.node.cordapp.CordappLoader
@@ -96,13 +99,10 @@ import java.time.Clock
 import java.time.Duration
 import java.time.format.DateTimeParseException
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit.MINUTES
 import java.util.concurrent.TimeUnit.SECONDS
-import kotlin.collections.set
-import kotlin.reflect.KClass
 import net.corda.core.crypto.generateKeyPair as cryptoGenerateKeyPair
 
 /**
@@ -117,11 +117,11 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
                                val platformClock: CordaClock,
                                protected val versionInfo: VersionInfo,
                                protected val cordappLoader: CordappLoader,
+                               protected val flowManager: FlowManager,
                                protected val serverThread: AffinityExecutor.ServiceAffinityExecutor,
                                private val busyNodeLatch: ReusableLatch = ReusableLatch()) : SingletonSerializeAsToken() {
 
     protected abstract val log: Logger
-
     @Suppress("LeakingThis")
     private var tokenizableServices: MutableList<Any>? = mutableListOf(platformClock, this)
     protected val runOnStop = ArrayList<() -> Any?>()
@@ -146,10 +146,12 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
             schemaService,
             configuration.dataSourceProperties
     )
+
     init {
         // TODO Break cyclic dependency
         identityService.database = database
     }
+
     val networkMapCache = PersistentNetworkMapCache(database, identityService).tokenize()
     val checkpointStorage = DBCheckpointStorage()
     @Suppress("LeakingThis")
@@ -200,7 +202,6 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
     ).tokenize().closeOnStop()
 
     private val cordappServices = MutableClassToInstanceMap.create<SerializeAsToken>()
-    private val flowFactories = ConcurrentHashMap<Class<out FlowLogic<*>>, InitiatedFlowFactory<*>>()
     private val shutdownExecutor = Executors.newSingleThreadExecutor()
 
     protected abstract val transactionVerifierWorkerCount: Int
@@ -226,7 +227,8 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
     private var _started: S? = null
 
     private fun <T : Any> T.tokenize(): T {
-        tokenizableServices?.add(this) ?: throw IllegalStateException("The tokenisable services list has already been finalised")
+        tokenizableServices?.add(this)
+                ?: throw IllegalStateException("The tokenisable services list has already been finalised")
         return this
     }
 
@@ -570,32 +572,33 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
         serviceClass.requireAnnotation<CordaService>()
 
         val service = try {
-           if (isNotaryService(serviceClass)) {
-               myNotaryIdentity ?: throw IllegalStateException("Trying to install a notary service but no notary identity specified")
-               try {
-                   val constructor = serviceClass.getDeclaredConstructor(ServiceHubInternal::class.java, PublicKey::class.java).apply { isAccessible = true }
-                   constructor.newInstance(services, myNotaryIdentity.owningKey )
-               } catch (ex: NoSuchMethodException) {
-                   val constructor = serviceClass.getDeclaredConstructor(AppServiceHub::class.java, PublicKey::class.java).apply { isAccessible = true }
-                   val serviceContext = AppServiceHubImpl<T>(services, flowStarter)
-                   val service = constructor.newInstance(serviceContext, myNotaryIdentity.owningKey)
-                   serviceContext.serviceInstance = service
-                   service
-               }
-           } else {
-               try {
-                   val serviceContext = AppServiceHubImpl<T>(services, flowStarter)
-                   val extendedServiceConstructor = serviceClass.getDeclaredConstructor(AppServiceHub::class.java).apply { isAccessible = true }
-                   val service = extendedServiceConstructor.newInstance(serviceContext)
-                   serviceContext.serviceInstance = service
-                   service
-               } catch (ex: NoSuchMethodException) {
-                   val constructor = serviceClass.getDeclaredConstructor(ServiceHub::class.java).apply { isAccessible = true }
-                   log.warn("${serviceClass.name} is using legacy CordaService constructor with ServiceHub parameter. " +
-                           "Upgrade to an AppServiceHub parameter to enable updated API features.")
-                   constructor.newInstance(services)
-               }
-           }
+            if (isNotaryService(serviceClass)) {
+                myNotaryIdentity
+                        ?: throw IllegalStateException("Trying to install a notary service but no notary identity specified")
+                try {
+                    val constructor = serviceClass.getDeclaredConstructor(ServiceHubInternal::class.java, PublicKey::class.java).apply { isAccessible = true }
+                    constructor.newInstance(services, myNotaryIdentity.owningKey)
+                } catch (ex: NoSuchMethodException) {
+                    val constructor = serviceClass.getDeclaredConstructor(AppServiceHub::class.java, PublicKey::class.java).apply { isAccessible = true }
+                    val serviceContext = AppServiceHubImpl<T>(services, flowStarter)
+                    val service = constructor.newInstance(serviceContext, myNotaryIdentity.owningKey)
+                    serviceContext.serviceInstance = service
+                    service
+                }
+            } else {
+                try {
+                    val serviceContext = AppServiceHubImpl<T>(services, flowStarter)
+                    val extendedServiceConstructor = serviceClass.getDeclaredConstructor(AppServiceHub::class.java).apply { isAccessible = true }
+                    val service = extendedServiceConstructor.newInstance(serviceContext)
+                    serviceContext.serviceInstance = service
+                    service
+                } catch (ex: NoSuchMethodException) {
+                    val constructor = serviceClass.getDeclaredConstructor(ServiceHub::class.java).apply { isAccessible = true }
+                    log.warn("${serviceClass.name} is using legacy CordaService constructor with ServiceHub parameter. " +
+                            "Upgrade to an AppServiceHub parameter to enable updated API features.")
+                    constructor.newInstance(services)
+                }
+            }
         } catch (e: InvocationTargetException) {
             throw ServiceInstantiationException(e.cause)
         }
@@ -609,7 +612,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
 
     private fun handleCustomNotaryService(service: NotaryService) {
         runOnStop += service::stop
-        installCoreFlow(NotaryFlow.Client::class, service::createServiceFlow)
+        flowManager.installCoreFlow(NotaryFlow.Client::class, service::createServiceFlow)
         service.start()
     }
 
@@ -639,7 +642,9 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
 
     private fun <F : FlowLogic<*>> registerInitiatedFlowInternal(smm: StateMachineManager, initiatedFlow: Class<F>, track: Boolean): Observable<F> {
         val constructors = initiatedFlow.declaredConstructors.associateBy { it.parameterTypes.toList() }
+
         val flowSessionCtor = constructors[listOf(FlowSession::class.java)]?.apply { isAccessible = true }
+
         val ctor: (FlowSession) -> F = if (flowSessionCtor == null) {
             // Try to fallback to a Party constructor
             val partyCtor = constructors[listOf(Party::class.java)]?.apply { isAccessible = true }
@@ -658,47 +663,16 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
             "${InitiatedBy::class.java.name} must point to ${classWithAnnotation.name} and not ${initiatingFlow.name}"
         }
         val flowFactory = InitiatedFlowFactory.CorDapp(version, initiatedFlow.appName, ctor)
-        val observable = internalRegisterFlowFactory(smm, initiatingFlow, flowFactory, initiatedFlow, track)
+        val observable = flowManager.internalRegisterFlowFactory(smm, initiatingFlow, flowFactory, initiatedFlow, track)
         log.info("Registered ${initiatingFlow.name} to initiate ${initiatedFlow.name} (version $version)")
         return observable
     }
 
-    protected fun <F : FlowLogic<*>> internalRegisterFlowFactory(smm: StateMachineManager,
-                                                                 initiatingFlowClass: Class<out FlowLogic<*>>,
-                                                                 flowFactory: InitiatedFlowFactory<F>,
-                                                                 initiatedFlowClass: Class<F>,
-                                                                 track: Boolean): Observable<F> {
-        val observable = if (track) {
-            smm.changes.filter { it is StateMachineManager.Change.Add }.map { it.logic }.ofType(initiatedFlowClass)
-        } else {
-            Observable.empty()
-        }
-        check(initiatingFlowClass !in flowFactories.keys) {
-            "$initiatingFlowClass is attempting to register multiple initiated flows"
-        }
-        flowFactories[initiatingFlowClass] = flowFactory
-        return observable
-    }
-
-    /**
-     * Installs a flow that's core to the Corda platform. Unlike CorDapp flows which are versioned individually using
-     * [InitiatingFlow.version], core flows have the same version as the node's platform version. To cater for backwards
-     * compatibility [flowFactory] provides a second parameter which is the platform version of the initiating party.
-     */
-    @VisibleForTesting
-    fun installCoreFlow(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>) {
-        require(clientFlowClass.java.flowVersionAndInitiatingClass.first == 1) {
-            "${InitiatingFlow::class.java.name}.version not applicable for core flows; their version is the node's platform version"
-        }
-        flowFactories[clientFlowClass.java] = InitiatedFlowFactory.Core(flowFactory)
-        log.debug { "Installed core flow ${clientFlowClass.java.name}" }
-    }
-
     private fun installCoreFlows() {
-        installCoreFlow(FinalityFlow::class, ::FinalityHandler)
-        installCoreFlow(NotaryChangeFlow::class, ::NotaryChangeHandler)
-        installCoreFlow(ContractUpgradeFlow.Initiate::class, ::ContractUpgradeHandler)
-        installCoreFlow(SwapIdentitiesFlow::class, ::SwapIdentitiesHandler)
+        flowManager.installCoreFlow(FinalityFlow::class, ::FinalityHandler, FinalityHandler::class)
+        flowManager.installCoreFlow(NotaryChangeFlow::class, ::NotaryChangeHandler, NotaryChangeHandler::class)
+        flowManager.installCoreFlow(ContractUpgradeFlow.Initiate::class, ::ContractUpgradeHandler, NotaryChangeHandler::class)
+        flowManager.installCoreFlow(SwapIdentitiesFlow::class, ::SwapIdentitiesHandler, SwapIdentitiesHandler::class)
     }
 
     protected open fun makeTransactionStorage(transactionCacheSizeBytes: Long): WritableTransactionStorage {
@@ -775,7 +749,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
             makeCoreNotaryService(it, myNotaryIdentity).also {
                 it.tokenize()
                 runOnStop += it::stop
-                installCoreFlow(NotaryFlow.Client::class, it::createServiceFlow)
+                flowManager.installCoreFlow(NotaryFlow.Client::class, it::createServiceFlow)
                 log.info("Running core notary: ${it.javaClass.name}")
                 it.start()
             }
@@ -955,7 +929,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
         }
 
         override fun getFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>): InitiatedFlowFactory<*>? {
-            return flowFactories[initiatingFlowClass]
+            return flowManager.getFlowFactoryForInitiatingFlow(initiatingFlowClass)
         }
 
         override fun jdbcSession(): Connection = database.createSession()

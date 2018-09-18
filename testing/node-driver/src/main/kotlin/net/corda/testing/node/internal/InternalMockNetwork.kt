@@ -31,6 +31,7 @@ import net.corda.core.utilities.seconds
 import net.corda.node.VersionInfo
 import net.corda.node.cordapp.CordappLoader
 import net.corda.node.internal.AbstractNode
+import net.corda.node.internal.FlowManager
 import net.corda.node.internal.InitiatedFlowFactory
 import net.corda.node.internal.cordapp.JarScanningCordappLoader
 import net.corda.node.services.api.FlowStarter
@@ -54,9 +55,9 @@ import net.corda.nodeapi.internal.persistence.CordaPersistence
 import net.corda.nodeapi.internal.persistence.DatabaseConfig
 import net.corda.testing.common.internal.testNetworkParameters
 import net.corda.testing.driver.TestCorDapp
-import net.corda.testing.internal.stubs.CertificateStoreStubs
 import net.corda.testing.internal.rigorousMock
 import net.corda.testing.internal.setGlobalSerialization
+import net.corda.testing.internal.stubs.CertificateStoreStubs
 import net.corda.testing.internal.testThreadFactory
 import net.corda.testing.node.*
 import net.corda.testing.node.MockServices.Companion.makeTestDataSourceProperties
@@ -149,7 +150,9 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
                                val notarySpecs: List<MockNetworkNotarySpec> = defaultParameters.notarySpecs,
                                val testDirectory: Path = Paths.get("build", getTimestampAsDirectoryName()),
                                val networkParameters: NetworkParameters = testNetworkParameters(),
-                               val defaultFactory: (MockNodeArgs, CordappLoader?) -> MockNode = { args, cordappLoader -> cordappLoader?.let { MockNode(args, it) } ?: MockNode(args) },
+                               val defaultFactory: (MockNodeArgs, CordappLoader?) -> MockNode = { args, cordappLoader ->
+                                   cordappLoader?.let { MockNode(args, it) } ?: MockNode(args)
+                               },
                                val cordappsForAllNodes: Set<TestCorDapp> = emptySet(),
                                val autoVisibleNodes: Boolean = true) : AutoCloseable {
     init {
@@ -208,7 +211,8 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
      */
     val defaultNotaryIdentity: Party
         get() {
-            return defaultNotaryNode.info.legalIdentities.singleOrNull() ?: throw IllegalStateException("Default notary has multiple identities")
+            return defaultNotaryNode.info.legalIdentities.singleOrNull()
+                    ?: throw IllegalStateException("Default notary has multiple identities")
         }
 
     /**
@@ -281,6 +285,7 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
             TestClock(Clock.systemUTC()),
             args.version,
             cordappLoader,
+            FlowManager(),
             args.network.getServerThread(args.id),
             args.network.busyLatch
     ) {
@@ -305,7 +310,7 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
                     flowFactory: InitiatedFlowFactory<F>,
                     initiatedFlowClass: Class<F>,
                     track: Boolean): Observable<F> =
-                    internals.internalRegisterFlowFactory(smm, initiatingFlowClass, flowFactory, initiatedFlowClass, track)
+                    internals.flowManager.internalRegisterFlowFactory(smm, initiatingFlowClass, flowFactory, initiatedFlowClass, track)
 
             override fun dispose() = internals.stop()
 
@@ -315,9 +320,11 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
 
         val mockNet = args.network
         val id = args.id
+
         init {
             require(id >= 0) { "Node ID must be zero or positive, was passed: $id" }
         }
+
         private val entropyRoot = args.entropyRoot
         var counter = entropyRoot
         override val log get() = staticLog
@@ -339,7 +346,7 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
                     this,
                     attachments,
                     network as MockNodeMessagingService,
-                    object : StartedNodeServices, ServiceHubInternal by services, FlowStarter by flowStarter { },
+                    object : StartedNodeServices, ServiceHubInternal by services, FlowStarter by flowStarter {},
                     nodeInfo,
                     smm,
                     database,
@@ -502,8 +509,10 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
      */
     @JvmOverloads
     fun runNetwork(rounds: Int = -1) {
-        check(!networkSendManuallyPumped) { "MockNetwork.runNetwork() should only be used when networkSendManuallyPumped == false. " +
-                "You can use MockNetwork.waitQuiescent() to wait for all the nodes to process all the messages on their queues instead." }
+        check(!networkSendManuallyPumped) {
+            "MockNetwork.runNetwork() should only be used when networkSendManuallyPumped == false. " +
+                    "You can use MockNetwork.waitQuiescent() to wait for all the nodes to process all the messages on their queues instead."
+        }
         fun pumpAll() = messagingNetwork.endpoints.map { it.pumpReceive(false) }
 
         if (rounds == -1) {

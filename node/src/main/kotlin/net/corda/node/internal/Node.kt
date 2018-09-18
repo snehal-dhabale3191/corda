@@ -88,12 +88,14 @@ class NodeWithInfo(val node: Node, val info: NodeInfo) {
 open class Node(configuration: NodeConfiguration,
                 versionInfo: VersionInfo,
                 private val initialiseSerialization: Boolean = true,
-                cordappLoader: CordappLoader = makeCordappLoader(configuration, versionInfo)
+                cordappLoader: CordappLoader = makeCordappLoader(configuration, versionInfo),
+                flowManager: FlowManager = FlowManager()
 ) : AbstractNode<NodeInfo>(
         configuration,
         createClock(configuration),
         versionInfo,
         cordappLoader,
+        flowManager,
         // Under normal (non-test execution) it will always be "1"
         AffinityExecutor.ServiceAffinityExecutor("Node thread-${sameVmNodeCounter.incrementAndGet()}", 1)
 ) {
@@ -189,7 +191,8 @@ open class Node(configuration: NodeConfiguration,
         return P2PMessagingClient(
                 config = configuration,
                 versionInfo = versionInfo,
-                serverAddress = configuration.messagingServerAddress ?: NetworkHostAndPort("localhost", configuration.p2pAddress.port),
+                serverAddress = configuration.messagingServerAddress
+                        ?: NetworkHostAndPort("localhost", configuration.p2pAddress.port),
                 nodeExecutor = serverThread,
                 database = database,
                 networkMap = networkMapCache,
@@ -213,7 +216,8 @@ open class Node(configuration: NodeConfiguration,
         }
 
         val messageBroker = if (!configuration.messagingServerExternal) {
-            val brokerBindAddress = configuration.messagingServerAddress ?: NetworkHostAndPort("0.0.0.0", configuration.p2pAddress.port)
+            val brokerBindAddress = configuration.messagingServerAddress
+                    ?: NetworkHostAndPort("0.0.0.0", configuration.p2pAddress.port)
             ArtemisMessagingServer(configuration, brokerBindAddress, networkParameters.maxMessageSize)
         } else {
             null
@@ -426,7 +430,7 @@ open class Node(configuration: NodeConfiguration,
         }.build().start()
     }
 
-    private fun registerNewRelicReporter (registry: MetricRegistry) {
+    private fun registerNewRelicReporter(registry: MetricRegistry) {
         log.info("Registering New Relic JMX Reporter:")
         val reporter = NewRelicReporter.forRegistry(registry)
                 .name("New Relic Reporter")
