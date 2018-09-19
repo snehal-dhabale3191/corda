@@ -38,14 +38,14 @@ class NoAnswer(private val closure: () -> Unit = {}) : FlowLogic<Unit>() {
  * Allows to register a flow of type [R] against an initiating flow of type [I].
  */
 inline fun <I : FlowLogic<*>, reified R : FlowLogic<*>> TestStartedNode.registerInitiatedFlow(initiatingFlowType: KClass<I>, crossinline construct: (session: FlowSession) -> R) {
-    registerFlowFactory(initiatingFlowType.java, InitiatedFlowFactory.Core { session -> construct(session) }, R::class.javaObjectType, true)
+    registerFlowFactory(initiatingFlowType.java, InitiatedFlowFactory.Core.of { session -> construct(session) }, true)
 }
 
 /**
  * Allows to register a flow of type [Answer] against an initiating flow of type [I], returning a valure of type [R].
  */
 inline fun <I : FlowLogic<*>, reified R : Any> TestStartedNode.registerAnswer(initiatingFlowType: KClass<I>, value: R) {
-    registerFlowFactory(initiatingFlowType.java, InitiatedFlowFactory.Core { session -> Answer(session, value) }, Answer::class.javaObjectType, true)
+    registerFlowFactory(initiatingFlowType.java, InitiatedFlowFactory.Core.of { session -> Answer(session, value) }, true)
 }
 
 /**

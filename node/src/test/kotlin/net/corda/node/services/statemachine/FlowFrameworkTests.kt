@@ -810,8 +810,7 @@ private inline fun <reified P : FlowLogic<*>> TestStartedNode.registerFlowFactor
         noinline flowFactory: (FlowSession) -> P): CordaFuture<P> {
     val observable = registerFlowFactory(
             initiatingFlowClass.java,
-            InitiatedFlowFactory.CorDapp(initiatedFlowVersion, "", flowFactory),
-            P::class.java,
+            InitiatedFlowFactory.CorDapp.of(initiatedFlowVersion, "", flowFactory),
             track = true)
     return observable.toFuture()
 }

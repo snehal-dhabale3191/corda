@@ -12,11 +12,11 @@ import kotlin.reflect.KClass
 interface FlowManager {
 
     // These registerInitiated* functions should be merged into one. If impossible, they should default to on that takes a FlowType as an additional parameter.
-    fun <F : FlowLogic<*>> registerInitiatedFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>, flowFactory: InitiatedFlowFactory<F>, initiatedFlowClass: Class<F>)
+    fun <F : FlowLogic<*>> registerInitiatedFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>, flowFactory: InitiatedFlowFactory<F>)
 
     fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>)
 
-    fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>?)
+    fun <F : FlowLogic<*>> registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> F, serverFlowClass: KClass<out F>?)
 
     fun getFlowFactoryForInitiatingFlow(initiatingFlowClass: Class<out FlowLogic<*>>): InitiatedFlowFactory<*>?
 }
@@ -27,32 +27,32 @@ class NodeFlowManager : FlowManager {
         private val log = contextLogger()
     }
 
-    private val flowFactories = ConcurrentHashMap<Class<out FlowLogic<*>>, RegisteredFlowContainer>()
+    private val flowFactories = ConcurrentHashMap<Class<out FlowLogic<*>>, RegisteredFlowContainer<*>>()
 
-    override fun <F : FlowLogic<*>> registerInitiatedFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>,
-                                                                 flowFactory: InitiatedFlowFactory<F>,
-                                                                 initiatedFlowClass: Class<F>) {
+    override fun <F : FlowLogic<*>> registerInitiatedFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>, flowFactory: InitiatedFlowFactory<F>) {
 
         flowFactories[initiatingFlowClass]?.let { currentRegistered ->
             if (currentRegistered.type == FlowType.CORE) {
                 throw IllegalStateException("Attempting to replace an existing platform flow: $initiatingFlowClass")
             }
 
-            if (currentRegistered.initiatedFlowClass?.isAssignableFrom(initiatedFlowClass) != true) {
+            if (currentRegistered.initiatedFlowClass?.isAssignableFrom(flowFactory.initiatedFlowClass) != true) {
                 throw IllegalStateException("$initiatingFlowClass is attempting to register multiple flow initiated by: $initiatingFlowClass")
             }
+            val initiatedFlowFactory = flowFactory as InitiatedFlowFactory.CorDapp<F>
             //the class to be registered is a subtype of the current registered class
-            flowFactories[initiatedFlowClass] = RegisteredFlowContainer(initiatingFlowClass, initiatedFlowClass, flowFactory, FlowType.CORDAPP)
+            flowFactories[initiatedFlowFactory.initiatedFlowClass] = RegisteredFlowContainer(initiatingFlowClass, initiatedFlowFactory.initiatedFlowClass, flowFactory, FlowType.CORDAPP)
         } ?: {
-            flowFactories[initiatingFlowClass] = RegisteredFlowContainer(initiatingFlowClass, initiatedFlowClass, flowFactory, FlowType.CORDAPP)
+            flowFactories[initiatingFlowClass] = RegisteredFlowContainer(initiatingFlowClass, flowFactory.initiatedFlowClass, flowFactory, FlowType.CORDAPP)
         }.invoke()
     }
 
-    override fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>?) {
+    override fun <F : FlowLogic<*>> registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> F, serverFlowClass: KClass<out F>?) {
         require(clientFlowClass.java.flowVersionAndInitiatingClass.first == 1) {
             "${InitiatingFlow::class.java.name}.version not applicable for core flows; their version is the node's platform version"
         }
-        flowFactories[clientFlowClass.java] = RegisteredFlowContainer(clientFlowClass.java, serverFlowClass?.java, InitiatedFlowFactory.Core(flowFactory), FlowType.CORE)
+        // TODO sollecitom check
+        flowFactories[clientFlowClass.java] = RegisteredFlowContainer(clientFlowClass.java, serverFlowClass?.java, InitiatedFlowFactory.Core(flowFactory, serverFlowClass?.javaObjectType as Class<F>?), FlowType.CORE)
         log.debug { "Installed core flow ${clientFlowClass.java.name}" }
     }
 
@@ -69,8 +69,8 @@ class NodeFlowManager : FlowManager {
         CORE, CORDAPP
     }
 
-    data class RegisteredFlowContainer(val initiatingFlowClass: Class<out FlowLogic<*>>,
+    data class RegisteredFlowContainer<F : FlowLogic<*>>(val initiatingFlowClass: Class<out FlowLogic<*>>,
                                        val initiatedFlowClass: Class<out FlowLogic<*>>?,
-                                       val flowFactory: InitiatedFlowFactory<FlowLogic<*>>,
+                                       val flowFactory: InitiatedFlowFactory<F>,
                                        val type: FlowType)
 }

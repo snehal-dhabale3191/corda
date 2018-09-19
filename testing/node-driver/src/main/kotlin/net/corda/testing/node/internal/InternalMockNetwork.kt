@@ -141,7 +141,6 @@ interface TestStartedNode {
 
     fun <F : FlowLogic<*>> registerFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>,
                                                flowFactory: InitiatedFlowFactory<F>,
-                                               initiatedFlowClass: Class<F>,
                                                track: Boolean): Observable<F>
 }
 
@@ -312,8 +311,7 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
             override fun <F : FlowLogic<*>> registerFlowFactory(
                     initiatingFlowClass: Class<out FlowLogic<*>>,
                     flowFactory: InitiatedFlowFactory<F>,
-                    initiatedFlowClass: Class<F>,
-                    track: Boolean): Observable<F> = smm.onAddedStateMachineForFlowOfType(track, initiatedFlowClass).also { internals.flowManager.registerInitiatedFlowFactory(initiatingFlowClass, flowFactory, initiatedFlowClass) }
+                    track: Boolean): Observable<F> = smm.onAddedStateMachineForFlowOfType(track, flowFactory.initiatedFlowClass).also { internals.flowManager.registerInitiatedFlowFactory(initiatingFlowClass, flowFactory) }
 
             override fun dispose() = internals.stop()
 

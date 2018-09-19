@@ -217,8 +217,7 @@ class StartedMockNode private constructor(private val node: TestStartedNode) {
                                                  responderFlowClass: Class<F>): CordaFuture<F> =
             node.registerFlowFactory(
                     initiatingFlowClass,
-                    InitiatedFlowFactory.CorDapp(flowVersion = 0, appName = "", factory = flowFactory::invoke),
-                    responderFlowClass, true)
+                    InitiatedFlowFactory.CorDapp(flowVersion = 0, appName = "", factory = flowFactory::invoke, initiatedFlowClass = responderFlowClass), true)
                     .toFuture()
 }
 

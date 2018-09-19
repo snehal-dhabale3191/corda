@@ -662,9 +662,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
         require(classWithAnnotation == initiatingFlow) {
             "${InitiatedBy::class.java.name} must point to ${classWithAnnotation.name} and not ${initiatingFlow.name}"
         }
-        val flowFactory = InitiatedFlowFactory.CorDapp(version, initiatedFlow.appName, ctor)
-        val observable = smm.onAddedStateMachineForFlowOfType(track, initiatedFlow)
-        flowManager.registerInitiatedFlowFactory(initiatingFlow, flowFactory, initiatedFlow)
+        val observable = smm.onAddedStateMachineForFlowOfType(track, initiatedFlow).also { flowManager.registerInitiatedFlowFactory(initiatingFlow, InitiatedFlowFactory.CorDapp(version, initiatedFlow.appName, initiatedFlow, ctor)) }
         log.info("Registered ${initiatingFlow.name} to initiate ${initiatedFlow.name} (version $version)")
         return observable
     }
@@ -1048,9 +1046,9 @@ fun clientSslOptionsCompatibleWith(nodeRpcOptions: NodeRpcOptions): ClientRpcSsl
     return ClientRpcSslOptions(trustStorePath = nodeRpcOptions.sslConfig!!.keyStorePath, trustStorePassword = nodeRpcOptions.sslConfig!!.keyStorePassword)
 }
 
-fun <F> StateMachineManager.onAddedStateMachineForFlowOfType(track: Boolean, flowLogicType: Class<F>): Observable<F> {
+fun <F> StateMachineManager.onAddedStateMachineForFlowOfType(track: Boolean, flowLogicType: Class<F>?): Observable<F> {
 
-    return if (track) {
+    return if (track && flowLogicType != null) {
         changes.filter { it is StateMachineManager.Change.Add }.map { it.logic }.ofType(flowLogicType)
     } else {
         Observable.empty()

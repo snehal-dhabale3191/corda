@@ -153,8 +153,7 @@ class AttachmentSerializationTest {
     private fun launchFlow(clientLogic: ClientLogic, rounds: Int, sendData: Boolean = false) {
         server.registerFlowFactory(
                 ClientLogic::class.java,
-                InitiatedFlowFactory.Core { ServerLogic(it, sendData) },
-                ServerLogic::class.java,
+                InitiatedFlowFactory.Core.of { ServerLogic(it, sendData) },
                 track = false)
         client.services.startFlow(clientLogic)
         mockNet.runNetwork(rounds)

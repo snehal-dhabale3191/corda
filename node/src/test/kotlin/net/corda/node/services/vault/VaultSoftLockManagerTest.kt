@@ -24,7 +24,6 @@ import net.corda.core.utilities.OpaqueBytes
 import net.corda.core.utilities.getOrThrow
 import net.corda.core.utilities.unwrap
 import net.corda.node.internal.InitiatedFlowFactory
-import net.corda.node.services.api.SchemaService
 import net.corda.node.services.api.VaultServiceInternal
 import net.corda.nodeapi.internal.persistence.CordaPersistence
 import net.corda.testing.core.singleIdentity
@@ -67,7 +66,7 @@ class NodePair(private val mockNet: InternalMockNetwork) {
         private set
 
     fun <T> communicate(clientLogic: AbstractClientLogic<T>, rebootClient: Boolean): FlowStateMachine<T> {
-        server.registerFlowFactory(AbstractClientLogic::class.java, InitiatedFlowFactory.Core { ServerLogic(it, serverRunning) }, ServerLogic::class.java, false)
+        server.registerFlowFactory(AbstractClientLogic::class.java, InitiatedFlowFactory.Core.of { ServerLogic(it, serverRunning) }, false)
         client.services.startFlow(clientLogic)
         while (!serverRunning.get()) mockNet.runNetwork(1)
         if (rebootClient) {
