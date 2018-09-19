@@ -33,6 +33,7 @@ import net.corda.node.cordapp.CordappLoader
 import net.corda.node.internal.AbstractNode
 import net.corda.node.internal.FlowManager
 import net.corda.node.internal.InitiatedFlowFactory
+import net.corda.node.internal.NodeFlowManager
 import net.corda.node.internal.cordapp.JarScanningCordappLoader
 import net.corda.node.services.api.FlowStarter
 import net.corda.node.services.api.ServiceHubInternal
@@ -282,7 +283,7 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
 
     open class MockNode(args: MockNodeArgs,
                         cordappLoader: CordappLoader = JarScanningCordappLoader.fromDirectories(args.config.cordappDirectories),
-                        flowManager: FlowManager = FlowManager()) : AbstractNode<TestStartedNode>(
+                        flowManager: FlowManager = NodeFlowManager()) : AbstractNode<TestStartedNode>(
             args.config,
             TestClock(Clock.systemUTC()),
             args.version,
@@ -312,7 +313,7 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
                     flowFactory: InitiatedFlowFactory<F>,
                     initiatedFlowClass: Class<F>,
                     track: Boolean): Observable<F> =
-                    internals.flowManager.internalRegisterFlowFactory(smm, initiatingFlowClass, flowFactory, initiatedFlowClass, track)
+                    internals.flowManager.registerInitiatedFlowFactory(smm, initiatingFlowClass, flowFactory, initiatedFlowClass, track)
 
             override fun dispose() = internals.stop()
 

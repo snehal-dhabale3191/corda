@@ -12,6 +12,7 @@ import net.corda.core.utilities.loggerFor
 import net.corda.node.VersionInfo
 import net.corda.node.internal.FlowManager
 import net.corda.node.internal.Node
+import net.corda.node.internal.NodeFlowManager
 import net.corda.node.internal.NodeWithInfo
 import net.corda.node.services.config.*
 import net.corda.nodeapi.internal.config.toConfig
@@ -88,7 +89,7 @@ abstract class NodeBasedTest(private val cordappPackages: List<String> = emptyLi
                   platformVersion: Int = 4,
                   rpcUsers: List<User> = emptyList(),
                   configOverrides: Map<String, Any> = emptyMap(),
-                  flowManager: FlowManager = FlowManager()): NodeWithInfo {
+                  flowManager: FlowManager = NodeFlowManager()): NodeWithInfo {
         val baseDirectory = baseDirectory(legalName).createDirectories()
         val p2pAddress = configOverrides["p2pAddress"] ?: portAllocation.nextHostAndPort().toString()
         val config = ConfigHelper.loadConfig(
@@ -147,6 +148,6 @@ abstract class NodeBasedTest(private val cordappPackages: List<String> = emptyLi
     }
 }
 
-class InProcessNode(configuration: NodeConfiguration, versionInfo: VersionInfo, flowManager: FlowManager = FlowManager()) : Node(configuration, versionInfo, false, flowManager = flowManager) {
+class InProcessNode(configuration: NodeConfiguration, versionInfo: VersionInfo, flowManager: FlowManager = NodeFlowManager()) : Node(configuration, versionInfo, false, flowManager = flowManager) {
     override val rxIoScheduler get() = CachedThreadScheduler(testThreadFactory()).also { runOnStop += it::shutdown }
 }

@@ -1,8 +1,8 @@
 package net.corda.node.internal
 
-import net.corda.core.crypto.SecureHash
 import net.corda.core.flows.FlowLogic
 import net.corda.core.flows.FlowSession
+import net.corda.core.flows.InitiatingFlow
 import net.corda.core.utilities.contextLogger
 import net.corda.core.utilities.debug
 import net.corda.node.services.statemachine.StateMachineManager
@@ -11,8 +11,20 @@ import rx.Observable
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KClass
 
-class FlowManager {
+interface FlowManager {
+    fun <F : FlowLogic<*>> registerInitiatedFlowFactory(smm: StateMachineManager,
+                                                        initiatingFlowClass: Class<out FlowLogic<*>>,
+                                                        flowFactory: InitiatedFlowFactory<F>,
+                                                        initiatedFlowClass: Class<F>,
+                                                        track: Boolean): Observable<F>
 
+    fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>)
+    fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>?)
+
+    fun getFlowFactoryForInitiatingFlow(initiatingFlowClass: Class<out FlowLogic<*>>): InitiatedFlowFactory<*>?
+}
+
+class NodeFlowManager : FlowManager {
 
     companion object {
         private val log = contextLogger()
@@ -20,11 +32,11 @@ class FlowManager {
 
     private val flowFactories = ConcurrentHashMap<Class<out FlowLogic<*>>, RegisteredFlowContainer>()
 
-    fun <F : FlowLogic<*>> internalRegisterFlowFactory(smm: StateMachineManager,
-                                                       initiatingFlowClass: Class<out FlowLogic<*>>,
-                                                       flowFactory: InitiatedFlowFactory<F>,
-                                                       initiatedFlowClass: Class<F>,
-                                                       track: Boolean): Observable<F> {
+    override fun <F : FlowLogic<*>> registerInitiatedFlowFactory(smm: StateMachineManager,
+                                                                 initiatingFlowClass: Class<out FlowLogic<*>>,
+                                                                 flowFactory: InitiatedFlowFactory<F>,
+                                                                 initiatedFlowClass: Class<F>,
+                                                                 track: Boolean): Observable<F> {
         val observable = if (track) {
             smm.changes.filter { it is StateMachineManager.Change.Add }.map { it.logic }.ofType(initiatedFlowClass)
         } else {
@@ -50,7 +62,7 @@ class FlowManager {
 
     }
 
-    fun installCoreFlow(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>? = null) {
+    override fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>?) {
         require(clientFlowClass.java.flowVersionAndInitiatingClass.first == 1) {
             "${InitiatingFlow::class.java.name}.version not applicable for core flows; their version is the node's platform version"
         }
@@ -58,7 +70,11 @@ class FlowManager {
         log.debug { "Installed core flow ${clientFlowClass.java.name}" }
     }
 
-    fun getFlowFactoryForInitiatingFlow(initiatingFlowClass: Class<out FlowLogic<*>>): InitiatedFlowFactory<*>? {
+    override fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>) {
+        registerInitiatedCoreFlowFactory(clientFlowClass, flowFactory, null)
+    }
+
+    override fun getFlowFactoryForInitiatingFlow(initiatingFlowClass: Class<out FlowLogic<*>>): InitiatedFlowFactory<*>? {
         return flowFactories[initiatingFlowClass]?.flowFactory
     }
 
@@ -71,7 +87,4 @@ class FlowManager {
                                        val initiatedFlowClass: Class<out FlowLogic<*>>?,
                                        val flowFactory: InitiatedFlowFactory<FlowLogic<*>>,
                                        val type: FlowType)
-
-    //TODO migrate to use this for key
-    data class InitiatingFlow(val initiatingFlowClass: Class<out FlowLogic<*>>, val version: Int, val providingCordappName: String, val providingCordappHash: SecureHash)
 }

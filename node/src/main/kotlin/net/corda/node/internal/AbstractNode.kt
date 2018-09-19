@@ -612,7 +612,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
 
     private fun handleCustomNotaryService(service: NotaryService) {
         runOnStop += service::stop
-        flowManager.installCoreFlow(NotaryFlow.Client::class, service::createServiceFlow)
+        flowManager.registerInitiatedCoreFlowFactory(NotaryFlow.Client::class, service::createServiceFlow)
         service.start()
     }
 
@@ -663,16 +663,16 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
             "${InitiatedBy::class.java.name} must point to ${classWithAnnotation.name} and not ${initiatingFlow.name}"
         }
         val flowFactory = InitiatedFlowFactory.CorDapp(version, initiatedFlow.appName, ctor)
-        val observable = flowManager.internalRegisterFlowFactory(smm, initiatingFlow, flowFactory, initiatedFlow, track)
+        val observable = flowManager.registerInitiatedFlowFactory(smm, initiatingFlow, flowFactory, initiatedFlow, track)
         log.info("Registered ${initiatingFlow.name} to initiate ${initiatedFlow.name} (version $version)")
         return observable
     }
 
     private fun installCoreFlows() {
-        flowManager.installCoreFlow(FinalityFlow::class, ::FinalityHandler, FinalityHandler::class)
-        flowManager.installCoreFlow(NotaryChangeFlow::class, ::NotaryChangeHandler, NotaryChangeHandler::class)
-        flowManager.installCoreFlow(ContractUpgradeFlow.Initiate::class, ::ContractUpgradeHandler, NotaryChangeHandler::class)
-        flowManager.installCoreFlow(SwapIdentitiesFlow::class, ::SwapIdentitiesHandler, SwapIdentitiesHandler::class)
+        flowManager.registerInitiatedCoreFlowFactory(FinalityFlow::class, ::FinalityHandler, FinalityHandler::class)
+        flowManager.registerInitiatedCoreFlowFactory(NotaryChangeFlow::class, ::NotaryChangeHandler, NotaryChangeHandler::class)
+        flowManager.registerInitiatedCoreFlowFactory(ContractUpgradeFlow.Initiate::class, ::ContractUpgradeHandler, NotaryChangeHandler::class)
+        flowManager.registerInitiatedCoreFlowFactory(SwapIdentitiesFlow::class, ::SwapIdentitiesHandler, SwapIdentitiesHandler::class)
     }
 
     protected open fun makeTransactionStorage(transactionCacheSizeBytes: Long): WritableTransactionStorage {
@@ -749,7 +749,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
             makeCoreNotaryService(it, myNotaryIdentity).also {
                 it.tokenize()
                 runOnStop += it::stop
-                flowManager.installCoreFlow(NotaryFlow.Client::class, it::createServiceFlow)
+                flowManager.registerInitiatedCoreFlowFactory(NotaryFlow.Client::class, it::createServiceFlow)
                 log.info("Running core notary: ${it.javaClass.name}")
                 it.start()
             }

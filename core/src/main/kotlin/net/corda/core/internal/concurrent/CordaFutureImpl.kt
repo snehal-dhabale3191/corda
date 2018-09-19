@@ -7,10 +7,7 @@ import net.corda.core.utilities.contextLogger
 import net.corda.core.utilities.getOrThrow
 import org.slf4j.Logger
 import java.time.Duration
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Executor
-import java.util.concurrent.Future
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.*
 
 /** @return a fresh [OpenFuture]. */
 fun <V> openFuture(): OpenFuture<V> = CordaFutureImpl()
@@ -68,7 +65,7 @@ fun <ELEMENT> CordaFuture<out ELEMENT>.mapError(transform: (Throwable) -> Throwa
  * In the case where this future fails, the transform is not invoked.
  */
 fun <V, W> CordaFuture<out V>.flatMap(transform: (V) -> CordaFuture<out W>): CordaFuture<W> = CordaFutureImpl<W>().also { result ->
-    thenMatch(success@ {
+    thenMatch(success@{
         result.captureLater(try {
             transform(it)
         } catch (t: Throwable) {
@@ -143,6 +140,7 @@ internal class CordaFutureImpl<V>(private val impl: CompletableFuture<V> = Compl
     companion object {
         private val defaultLog = contextLogger()
         internal const val listenerFailedMessage = "Future listener failed:"
+        private val completionPool = Executors.newSingleThreadExecutor();
     }
 
     override fun set(value: V) = impl.complete(value)
@@ -160,12 +158,18 @@ internal class CordaFutureImpl<V>(private val impl: CompletableFuture<V> = Compl
     }
 
     // We don't simply return impl so that the caller can't interfere with it.
-    override fun toCompletableFuture() = CompletableFuture<V>().also { completable ->
+    override fun toCompletableFuture(): CompletableFuture<V> {
+        val toReturn = CompletableFuture<V>()
         thenMatch({
-            completable.complete(it)
+            completionPool.submit {
+                toReturn.complete(it)
+            }
         }, {
-            completable.completeExceptionally(it)
+            completionPool.submit {
+                toReturn.completeExceptionally(it)
+            }
         })
+        return toReturn;
     }
 }
 

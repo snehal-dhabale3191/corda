@@ -89,7 +89,7 @@ open class Node(configuration: NodeConfiguration,
                 versionInfo: VersionInfo,
                 private val initialiseSerialization: Boolean = true,
                 cordappLoader: CordappLoader = makeCordappLoader(configuration, versionInfo),
-                flowManager: FlowManager = FlowManager()
+                flowManager: FlowManager = NodeFlowManager()
 ) : AbstractNode<NodeInfo>(
         configuration,
         createClock(configuration),
