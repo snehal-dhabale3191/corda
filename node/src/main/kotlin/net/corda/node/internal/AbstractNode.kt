@@ -663,7 +663,8 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
             "${InitiatedBy::class.java.name} must point to ${classWithAnnotation.name} and not ${initiatingFlow.name}"
         }
         val flowFactory = InitiatedFlowFactory.CorDapp(version, initiatedFlow.appName, ctor)
-        val observable = flowManager.registerInitiatedFlowFactory(smm, initiatingFlow, flowFactory, initiatedFlow, track)
+        val observable = smm.onAddedStateMachineForFlowOfType(track, initiatedFlow)
+        flowManager.registerInitiatedFlowFactory(initiatingFlow, flowFactory, initiatedFlow)
         log.info("Registered ${initiatingFlow.name} to initiate ${initiatedFlow.name} (version $version)")
         return observable
     }
@@ -1045,4 +1046,13 @@ fun clientSslOptionsCompatibleWith(nodeRpcOptions: NodeRpcOptions): ClientRpcSsl
     }
     // Here we're using the node's RPC key store as the RPC client's trust store.
     return ClientRpcSslOptions(trustStorePath = nodeRpcOptions.sslConfig!!.keyStorePath, trustStorePassword = nodeRpcOptions.sslConfig!!.keyStorePassword)
+}
+
+fun <F> StateMachineManager.onAddedStateMachineForFlowOfType(track: Boolean, flowLogicType: Class<F>): Observable<F> {
+
+    return if (track) {
+        changes.filter { it is StateMachineManager.Change.Add }.map { it.logic }.ofType(flowLogicType)
+    } else {
+        Observable.empty()
+    }
 }

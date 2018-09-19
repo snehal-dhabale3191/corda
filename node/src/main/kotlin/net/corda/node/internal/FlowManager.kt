@@ -5,20 +5,17 @@ import net.corda.core.flows.FlowSession
 import net.corda.core.flows.InitiatingFlow
 import net.corda.core.utilities.contextLogger
 import net.corda.core.utilities.debug
-import net.corda.node.services.statemachine.StateMachineManager
 import net.corda.node.services.statemachine.flowVersionAndInitiatingClass
-import rx.Observable
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KClass
 
 interface FlowManager {
-    fun <F : FlowLogic<*>> registerInitiatedFlowFactory(smm: StateMachineManager,
-                                                        initiatingFlowClass: Class<out FlowLogic<*>>,
-                                                        flowFactory: InitiatedFlowFactory<F>,
-                                                        initiatedFlowClass: Class<F>,
-                                                        track: Boolean): Observable<F>
+
+    // These registerInitiated* functions should be merged into one. If impossible, they should default to on that takes a FlowType as an additional parameter.
+    fun <F : FlowLogic<*>> registerInitiatedFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>, flowFactory: InitiatedFlowFactory<F>, initiatedFlowClass: Class<F>)
 
     fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>)
+
     fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>?)
 
     fun getFlowFactoryForInitiatingFlow(initiatingFlowClass: Class<out FlowLogic<*>>): InitiatedFlowFactory<*>?
@@ -32,18 +29,11 @@ class NodeFlowManager : FlowManager {
 
     private val flowFactories = ConcurrentHashMap<Class<out FlowLogic<*>>, RegisteredFlowContainer>()
 
-    override fun <F : FlowLogic<*>> registerInitiatedFlowFactory(smm: StateMachineManager,
-                                                                 initiatingFlowClass: Class<out FlowLogic<*>>,
+    override fun <F : FlowLogic<*>> registerInitiatedFlowFactory(initiatingFlowClass: Class<out FlowLogic<*>>,
                                                                  flowFactory: InitiatedFlowFactory<F>,
-                                                                 initiatedFlowClass: Class<F>,
-                                                                 track: Boolean): Observable<F> {
-        val observable = if (track) {
-            smm.changes.filter { it is StateMachineManager.Change.Add }.map { it.logic }.ofType(initiatedFlowClass)
-        } else {
-            Observable.empty()
-        }
+                                                                 initiatedFlowClass: Class<F>) {
 
-        return flowFactories[initiatingFlowClass]?.let { currentRegistered ->
+        flowFactories[initiatingFlowClass]?.let { currentRegistered ->
             if (currentRegistered.type == FlowType.CORE) {
                 throw IllegalStateException("Attempting to replace an existing platform flow: $initiatingFlowClass")
             }
@@ -53,13 +43,9 @@ class NodeFlowManager : FlowManager {
             }
             //the class to be registered is a subtype of the current registered class
             flowFactories[initiatedFlowClass] = RegisteredFlowContainer(initiatingFlowClass, initiatedFlowClass, flowFactory, FlowType.CORDAPP)
-            observable
         } ?: {
             flowFactories[initiatingFlowClass] = RegisteredFlowContainer(initiatingFlowClass, initiatedFlowClass, flowFactory, FlowType.CORDAPP)
-            observable
         }.invoke()
-
-
     }
 
     override fun registerInitiatedCoreFlowFactory(clientFlowClass: KClass<out FlowLogic<*>>, flowFactory: (FlowSession) -> FlowLogic<*>, serverFlowClass: KClass<out FlowLogic<*>>?) {

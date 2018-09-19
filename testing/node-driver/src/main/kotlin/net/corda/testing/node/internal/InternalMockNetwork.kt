@@ -35,6 +35,7 @@ import net.corda.node.internal.FlowManager
 import net.corda.node.internal.InitiatedFlowFactory
 import net.corda.node.internal.NodeFlowManager
 import net.corda.node.internal.cordapp.JarScanningCordappLoader
+import net.corda.node.internal.onAddedStateMachineForFlowOfType
 import net.corda.node.services.api.FlowStarter
 import net.corda.node.services.api.ServiceHubInternal
 import net.corda.node.services.api.StartedNodeServices
@@ -312,8 +313,7 @@ open class InternalMockNetwork(defaultParameters: MockNetworkParameters = MockNe
                     initiatingFlowClass: Class<out FlowLogic<*>>,
                     flowFactory: InitiatedFlowFactory<F>,
                     initiatedFlowClass: Class<F>,
-                    track: Boolean): Observable<F> =
-                    internals.flowManager.registerInitiatedFlowFactory(smm, initiatingFlowClass, flowFactory, initiatedFlowClass, track)
+                    track: Boolean): Observable<F> = smm.onAddedStateMachineForFlowOfType(track, initiatedFlowClass).also { internals.flowManager.registerInitiatedFlowFactory(initiatingFlowClass, flowFactory, initiatedFlowClass) }
 
             override fun dispose() = internals.stop()
 
