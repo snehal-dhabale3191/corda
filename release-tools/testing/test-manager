@@ -1,0 +1,327 @@
+#!/usr/bin/env python
+
+# {{{ Dependencies
+
+from __future__ import print_function
+import sys
+from argparse import ArgumentParser
+from getpass import getpass
+
+# {{{ JIRA dependency
+from jira import JIRA
+# }}}
+
+# {{{ Optional keyring dependency
+try:
+    from keyring import get_password, set_password
+except:
+    def get_password(account, user):
+        return None
+    def set_password(account, user, password):
+        pass
+# }}}
+
+# }}}
+
+# {{{ Utility functions
+
+# {{{ error(args...) - Print message to STDERR and exit
+def error(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+    print('', file=sys.stderr)
+    sys.exit(1)
+# }}}
+
+# {{{ get_arguments() - Get structured command-line arguments
+def get_arguments():
+    parser = ArgumentParser()
+    parser.add_argument('--jira-user',
+            help='The user name used to log in to JIRA',
+            type=str, metavar='EMAIL')
+    parser.add_argument('--disable-keyring',
+            help='Do not retrieve passwords persisted in the keyring',
+            action='store_true')
+    parser.add_argument('--target-version',
+            help='The target version of the release, e.g., 4.0',
+            type=str, metavar='VERSION')
+    parser.add_argument('--release-candidate',
+            help='The number of the release candidate, e.g., 1',
+            type=int, metavar='RC', default=1)
+    parser.add_argument('--distribution',
+            help='The distribution under test (OS, ENT, NS)',
+            choices=['OS', 'ENT', 'NS'], nargs='?', const='OS', metavar='DISTRO', default='OS')
+    parser.add_argument('--new-release',
+            help='Create test tickets for the specified target release',
+            action='store_true')
+    parser.add_argument('--new-release-candidate',
+            help='Create tickets for a test run of the specified release candidate',
+            action='store_true')
+    parser.add_argument('--list-tests',
+            help='List active test cases that are applicable to the specified release',
+            action='store_true')
+    return parser.parse_args()
+# }}}
+
+# {{{ ask_continue(prompt) - Prompt the user if he/she wants to continue or exit
+def ask_continue(prompt):
+    try:
+        reply = raw_input(u'{} (y/N) '.format(prompt)).lower().strip()
+    except:
+        print()
+        reply = ''
+    if reply != 'y':
+        sys.exit(1)
+# }}}
+
+# }}}
+
+# {{{ Class for managing login sessions
+class LoginManager:
+
+    # {{{ init(system_identifier, title) - Initialise login manager
+    def __init__(self, system_identifier, title, args):
+        self.system_identifier = system_identifier
+        self.title = title
+        self.args = args
+    # }}}
+
+    # {{{ prompt(title, user=None, password=None) - Prompt for username and password.
+    def prompt(self, title, user=None, password=None):
+        try:
+            prompted = False
+            if not user:
+                print(title)
+                user = args.jira_user
+                if not user:
+                    user = raw_input('  User: ')
+                else:
+                    print('  User: ' + user)
+                prompted = True
+            password = get_password(self.system_identifier, user) \
+                    if password is None and not args.disable_keyring else password
+            if not password:
+                if not prompted:
+                    print(title)
+                    prompted = True
+                password = getpass('  Password: ')
+                if not args.disable_keyring:
+                    set_password(self.system_identifier, user, password)
+            if prompted:
+                print()
+            return (user, password)
+        except:
+            return (None, None)
+    # }}}
+
+# }}}
+
+# {{{ Class for interacting with a hosted Jira system.
+class Jira:
+
+    # {{{ init(login_manager, address) - Initialise Jira class, pointing it to the Jira endpoint.
+    def __init__(self, login_manager, address='https://r3-cev.atlassian.net'):
+        self.login_manager = login_manager
+        self.address = address
+        self.jira = None
+        self.custom_fields_by_name, self.custom_fields_by_key = {}, {}
+    # }}}
+
+    # {{{ login(user, password) - Log in as user, and prompt for password if not specified.
+    def login(self, user=None, password=None):
+        user, password = self.login_manager.prompt('JIRA', user, password)
+        try:
+            self.jira = JIRA(self.address, auth=(user, password))
+        except:
+            error('Error: Failed to connect to JIRA')
+
+        for x in self.jira.fields():
+            if x['custom']:
+                self.custom_fields_by_name[x['name']] = x['key']
+                self.custom_fields_by_key[x['key']] = x['name']
+
+        return self
+    # }}}
+
+    # {{{ search(query) - Search for issues and manually traverse pages if multiple pages are returned.
+    def search(self, query):
+        max_count = 50
+        index, offset, count = 0, 0, max_count
+        while count == max_count:
+            issues = self.jira.search_issues(query, maxResults=max_count, startAt=offset)
+            count = len(issues)
+            offset += count
+            for issue in issues:
+                index += 1
+                yield self.wrap_issue(index, issue)
+    # }}}
+
+    # {{{ create(fields) - Create a new issue
+    def create(self, fields):
+        # return (0, fields, 'TEMP')
+        issue = self.jira.create_issue(fields)
+        return self.wrap_issue(0, issue)
+    # }}}
+
+    # {{{ link() - Link one issue to another
+    def link(self, issue, other_issue):
+        self.jira.create_issue_link(
+            type='Relates',
+            inwardIssue=issue.key,
+            outwardIssue=other_issue.key,
+            comment={
+                "body": "Linked {} to {}".format(issue.key, other_issue.key),
+            }
+        )
+    # }}}
+
+    # {{{ wrap_issue(index, issue) - Generate a standardised description for a JIRA issue
+    def wrap_issue(self, index, issue):
+        description = u"{} - {} ({})".format(issue.key, issue.fields.summary, ', '.join(issue.fields.labels))
+        return (index, issue, description)
+    # }}}
+
+# }}}
+
+# {{{ Jira helper functions for the Corda testing project
+
+# {{{ field_key() - Get the underlying field name
+def field_key(jira, name):
+    return jira.custom_fields_by_name[name]
+# }}}
+
+# {{{ field_value() - Get the field value for a specific issue, or None if not present
+def field_value(jira, issue, name):
+    field = jira.custom_fields_by_name[name]
+    return issue.raw['fields'][field] if field in issue.raw['fields'] else None
+# }}}
+
+# {{{ create_test() - Clone a ticket for a specific release
+def create_test(jira, issue_type, issue, target_version, parent=None):
+    fields = {
+        'project'                                   : issue.raw['fields']['project'],
+        'summary'                                   : issue.fields.summary,
+        'description'                               : issue.fields.description,
+        'issuetype'                                 : issue_type,
+        field_key(jira, 'Target Version/s')         : [{ 'name' : target_version }],
+        'labels'                                    : [ target_version.replace(' ', '-'), 'Generated' ]
+    }
+    if parent:
+        fields['parent'] = { 'key' : parent }
+    else:
+        fields[field_key(jira, 'Epic Link')]                = field_value(jira, issue, 'Epic Link')
+        fields[field_key(jira, 'Preconditions')]            = field_value(jira, issue, 'Preconditions')
+        fields[field_key(jira, 'Test Steps')]               = field_value(jira, issue, 'Test Steps')
+        fields[field_key(jira, 'Acceptance Criteria')]      = field_value(jira, issue, 'Acceptance Criteria')
+        fields[field_key(jira, 'Primary Test Environment')] = field_value(jira, issue, 'Primary Test Environment')
+    return jira.create(fields)
+# }}}
+
+# {{{ version_matches_distribution() - Check if any of the specified versions match against the provided distribution
+def version_matches_distribution(versions, distribution):
+    for version_object in versions:
+        version = version_object['name']
+        if distribution == 'NS':
+            if 'Corda Network Services' in version:
+                return True
+        elif distribution == 'ENT':
+            if 'Corda Enterprise' in version:
+                return True
+        elif distribution == 'OS':
+            if 'Corda ' in version and 'Corda E' not in version and 'Corda N' not in version:
+                return True
+    return False
+# }}}
+
+# {{{ get_test_cases() - Get all test templates pertaining to a distribution
+def get_test_cases(jira, distribution):
+    for index, issue, description in jira.search('project = R3T AND issueType = "Platform Test Template" AND status = "Active"'):
+        versions = field_value(jira, issue, 'Target Version/s')
+        if version_matches_distribution(versions, distribution):
+            yield (index, issue, description)
+# }}}
+
+# {{{ get_test_cases_for_release() - Get all test cases for a specific release
+def get_test_cases_for_release(jira, target_version):
+    for index, issue, description in jira.search('project = R3T AND issueType = "Platform Test" AND "Target Version/s" = "{}"'.format(target_version)):
+        yield (index, issue, description)
+# }}}
+
+# {{{ create_tickets_for_release() - Create instances of each test case marked as active
+def create_tickets_for_release(login_manager, distribution, target_version):
+    ask_continue('Create tickets for release?')
+    jira = Jira(login_manager).login()
+    for index, issue, description in get_test_cases(jira, distribution):
+        print(description)
+        print(' -> Creating test case for version {}...'.format(target_version))
+        try:
+            index, test, description = create_test(jira, 'Platform Test', issue, target_version)
+            print('    [Success] - {}'.format(description))
+        except error:
+            print('    [Fail] - {}'.format(error))
+            print()
+            continue
+        print(' -> Linking test case to template...')
+        try:
+            jira.link(test, issue)
+            print('    [Success] - Linked {} to {}'.format(test.key, issue.key))
+        except error:
+            print('    [Fail] - {}'.format(error))
+        print()
+# }}}
+
+# {{{ create_tickets_for_release_candidate() - Create test run tickets for a specific release candidate
+def create_tickets_for_release_candidate(login_manager, distribution, target_version, test_version):
+    ask_continue('Create tickets for release candidate?')
+    jira = Jira(login_manager).login()
+    for index, issue, description in get_test_cases_for_release(jira, target_version):
+        print(description)
+        print(' -> Creating test case for release candidate {}'.format(test_version))
+        try:
+            index, test, description = create_test(jira, 'Platform Test Run', issue, test_version, issue.key)
+            print('    [Success] - {}'.format(description))
+        except error:
+            print('    [Fail] - {}'.format(error))
+        print()
+# }}}
+
+# {{{ list_test_cases() - List test cases matching the specified configuration
+def list_test_cases(login_manager, distribution):
+    jira = Jira(login_manager).login()
+    for index, issue, description in get_test_cases(jira, distribution):
+        print(description)
+# }}}
+
+# }}}
+
+args = get_arguments()
+login_manager = LoginManager('jira', 'JIRA', args)
+
+# Check distribution
+if args.distribution == 'OS':
+    distribution = u''
+elif args.distribution == 'ENT':
+    distribution = u'Enterprise '
+elif args.distribution == 'NS':
+    distribution = u'Network Services '
+else:
+    error(u'Error: Invalid distribution provided [OS, ENT, NS]')
+
+# Check target version
+if not args.target_version:
+    error(u'Error: No target version specified')
+
+# Derive target and test version constants
+target_version = u'Corda {}{}'.format(distribution, args.target_version)
+test_version = u'Corda {}{} RC{:02d}'.format(distribution, args.target_version, args.release_candidate)
+print(u'Target Version: {}'.format(target_version))
+print(u'Test Version:   {}\n'.format(test_version))
+
+# Process command
+if args.new_release:
+    create_tickets_for_release(login_manager, args.distribution, target_version)
+elif args.new_release_candidate:
+    create_tickets_for_release_candidate(login_manager, args.distribution, target_version, test_version)
+elif args.list_tests:
+    list_test_cases(login_manager, args.distribution)
+else:
+    print('Action not specified [--new-release, --new-release-candidate, --list-tests]')
