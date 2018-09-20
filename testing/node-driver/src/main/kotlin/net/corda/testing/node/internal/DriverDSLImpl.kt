@@ -475,6 +475,7 @@ class DriverDSLImpl(
             val config = NotaryConfig(
                     validating = spec.validating,
                     serviceLegalName = spec.name,
+                    className = "net.corda.notary.raft.RaftNotaryService",
                     raft = RaftConfig(nodeAddress = nodeAddress, clusterAddresses = clusterAddresses))
             return config.toConfigMap()
         }
