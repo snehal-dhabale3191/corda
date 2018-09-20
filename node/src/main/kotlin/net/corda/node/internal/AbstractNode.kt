@@ -138,7 +138,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
         }
     }
 
-    val schemaService = NodeSchemaService(cordappLoader.cordappSchemas, configuration.notary != null).tokenize()
+    val schemaService = NodeSchemaService(cordappLoader.cordappSchemas + notarySchemas).tokenize()
     val identityService = PersistentIdentityService().tokenize()
     val database: CordaPersistence = createCordaPersistence(
             configuration.database,
@@ -778,13 +778,21 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
 
     private fun makeNotaryService(myNotaryIdentity: PartyAndCertificate?): NotaryService? {
         return configuration.notary?.let {
-            makeCoreNotaryService(it, myNotaryIdentity).also {
-                it.tokenize()
-                runOnStop += it::stop
-                installCoreFlow(NotaryFlow.Client::class, it::createServiceFlow)
-                log.info("Running core notary: ${it.javaClass.name}")
-                it.start()
+            val notaryKey = myNotaryIdentity?.owningKey
+                    ?: throw IllegalArgumentException("No notary identity initialized when creating a notary service")
+
+            val serviceClass = Class.forName(it.className)
+            val constructor = serviceClass.getDeclaredConstructor(ServiceHubInternal::class.java, PublicKey::class.java).apply { isAccessible = true }
+            val service = constructor.newInstance(services, notaryKey) as NotaryService
+
+            service.run {
+                tokenize()
+                runOnStop += ::stop
+                installCoreFlow(NotaryFlow.Client::class, ::createServiceFlow)
+                log.info("Starting notary service: ${javaClass.name}")
+                start()
             }
+            return service
         }
     }
 
@@ -793,32 +801,6 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
         // the KMS is meant for derived temporary keys used in transactions, and we're not supposed to sign things with
         // the identity key. But the infrastructure to make that easy isn't here yet.
         return PersistentKeyManagementService(identityService, database)
-    }
-
-    private fun makeCoreNotaryService(notaryConfig: NotaryConfig, myNotaryIdentity: PartyAndCertificate?): NotaryService {
-        val notaryKey = myNotaryIdentity?.owningKey
-                ?: throw IllegalArgumentException("No notary identity initialized when creating a notary service")
-        return notaryConfig.run {
-            when {
-                raft != null -> {
-                    val uniquenessProvider = RaftUniquenessProvider(configuration.baseDirectory, configuration.p2pSslOptions, database, platformClock, monitoringService.metrics, raft)
-                    (if (validating) ::RaftValidatingNotaryService else ::RaftNonValidatingNotaryService)(services, notaryKey, uniquenessProvider)
-                }
-                bftSMaRt != null -> {
-                    if (validating) throw IllegalArgumentException("Validating BFTSMaRt notary not supported")
-                    BFTNonValidatingNotaryService(services, notaryKey, bftSMaRt, makeBFTCluster(notaryKey, bftSMaRt))
-                }
-                else -> (if (validating) ::ValidatingNotaryService else ::SimpleNotaryService)(services, notaryKey)
-            }
-        }
-    }
-
-    protected open fun makeBFTCluster(notaryKey: PublicKey, bftSMaRtConfig: BFTSMaRtConfiguration): BFTSMaRt.Cluster {
-        return object : BFTSMaRt.Cluster {
-            override fun waitUntilAllReplicasHaveInitialized() {
-                log.warn("A BFT replica may still be initializing, in which case the upcoming consensus change may cause it to spin.")
-            }
-        }
     }
 
     open fun stop() {
@@ -919,6 +901,20 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
             log.info("Agent jar file: $jarFilePath")
             JVMAgentRegistry.attach("jolokia", "port=$port", jarFilePath)
         }
+    }
+
+    private val notarySchemas: List<MappedSchema>
+        get() {
+            return if (configuration.notary != null) {
+                loadNotarySchemas(configuration.notary!!.className)
+            } else emptyList()
+        }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun loadNotarySchemas(notaryClassName: String): List<MappedSchema> {
+        return Class.forName(notaryClassName)
+                .getDeclaredMethod("getSchemas")
+                .invoke(null) as List<MappedSchema>
     }
 
     inner class ServiceHubInternalImpl : SingletonSerializeAsToken(), ServiceHubInternal, ServicesForResolution by servicesForResolution {
