@@ -97,7 +97,6 @@ class BasicHSMKeyManagementService(val identityService: PersistentIdentityServic
     }
 
     override fun sign(bytes: ByteArray, publicKey: PublicKey): DigitalSignature.WithKey {
-        cryptoService.sign()
         val keyPair = getSigningKeyPair(publicKey)
         return keyPair.sign(bytes)
     }
