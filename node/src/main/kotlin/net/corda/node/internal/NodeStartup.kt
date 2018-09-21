@@ -45,7 +45,6 @@ import java.io.RandomAccessFile
 import java.lang.management.ManagementFactory
 import java.net.InetAddress
 import java.nio.file.Path
-import java.nio.file.Paths
 import java.time.DayOfWeek
 import java.time.ZonedDateTime
 import java.util.*
@@ -255,7 +254,7 @@ open class NodeStartup : CordaCliWrapper("corda", "Runs a Corda Node") {
             return
         }
         if (cmdLineOptions.justGenerateNodeInfo) {
-            // Perform the minimum required start-up logic to be able to write a nodeInfo to disk
+            // Perform the minimum required start-up logic to be able to write a nodeInfo to disk.
             node.generateAndSaveNodeInfo()
             return
         }

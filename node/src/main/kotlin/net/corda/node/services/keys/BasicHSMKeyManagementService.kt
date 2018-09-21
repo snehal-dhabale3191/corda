@@ -27,7 +27,7 @@ import javax.persistence.Lob
  * This class needs database transactions to be in-flight during method calls and init.
  */
 class BasicHSMKeyManagementService(val identityService: PersistentIdentityService,
-                                   private val database: CordaPersistence, private val cryptoService: CryptoService) : SingletonSerializeAsToken(), KeyManagementServiceInternal {
+                                   private val database: CordaPersistence, private val cryptoService: CryptoService?) : SingletonSerializeAsToken(), KeyManagementServiceInternal {
     @Entity
     @javax.persistence.Table(name = "${NODE_DATABASE_PREFIX}our_key_pairs")
     class PersistentKey(
