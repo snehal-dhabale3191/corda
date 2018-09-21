@@ -794,10 +794,7 @@ abstract class AbstractNode<S>(val configuration: NodeConfiguration,
 
     private fun makeCryptoService(): CryptoService? {
         return when(configuration.cryptoServiceName) {
-            SupportedCryptoServices.BC_SIMPLE -> BCCryptoService(configuration.cryptoServiceConf)
-            SupportedCryptoServices.UTIMACO -> TODO()
-            SupportedCryptoServices.GEMALTO_LUNA -> TODO()
-            SupportedCryptoServices.AZURE_KV -> TODO()
+            SupportedCryptoServices.BC_SIMPLE -> BCCryptoService(configuration)
             null -> null
         }
     }
