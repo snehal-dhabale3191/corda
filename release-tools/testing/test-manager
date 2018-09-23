@@ -23,6 +23,15 @@ except:
 
 # }}}
 
+#
+# Clearly needs filling in for the other two projects
+#
+projectsToEpics = {
+    "OS"  : [ ],
+    "ENT" : [ ],
+    "NS"  : [ "R3T-227" ]
+}
+
 # {{{ Utility functions
 
 # {{{ error(args...) - Print message to STDERR and exit
@@ -235,8 +244,9 @@ def version_matches_distribution(versions, distribution):
 # {{{ get_test_cases() - Get all test templates pertaining to a distribution
 def get_test_cases(jira, distribution):
     for index, issue, description in jira.search('project = R3T AND issueType = "Platform Test Template" AND status = "Active"'):
-        versions = field_value(jira, issue, 'Target Version/s')
-        if version_matches_distribution(versions, distribution):
+
+        # customfield_10015 == "Epic Link"
+        if (issue.fields.customfield_10015 in projectsToEpics[args.distribution]) :
             yield (index, issue, description)
 # }}}
 
