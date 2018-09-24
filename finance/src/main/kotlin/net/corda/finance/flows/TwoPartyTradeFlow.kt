@@ -64,12 +64,12 @@ object TwoPartyTradeFlow {
         companion object {
             object AWAITING_PROPOSAL : ProgressTracker.Step("Awaiting transaction proposal")
             // DOCSTART 3
-            object VERIFYING_AND_SIGNING : ProgressTracker.Step("Verifying and signing transaction proposal") {
-                override fun childProgressTracker() = SignTransactionFlow.tracker()
+            object SIGN_AND_WAIT : ProgressTracker.Step("Verifying and signing transaction proposal and waiting for commit") {
+                override fun childProgressTracker() = SignAndWaitForCommitFlow.tracker()
             }
             // DOCEND 3
 
-            fun tracker() = ProgressTracker(AWAITING_PROPOSAL, VERIFYING_AND_SIGNING)
+            fun tracker() = ProgressTracker(AWAITING_PROPOSAL, SIGN_AND_WAIT)
         }
 
         // DOCSTART 4
@@ -85,7 +85,7 @@ object TwoPartyTradeFlow {
             otherSideSession.send(hello)
 
             // Verify and sign the transaction.
-            progressTracker.currentStep = VERIFYING_AND_SIGNING
+            progressTracker.currentStep = SIGN_AND_WAIT
 
             // DOCSTART 07
             // Sync identities to ensure we know all of the identities involved in the transaction we're about to
@@ -94,8 +94,8 @@ object TwoPartyTradeFlow {
             // DOCEND 07
 
             // DOCSTART 5
-            val signTransactionFlow = object : SignTransactionFlow(otherSideSession, VERIFYING_AND_SIGNING.childProgressTracker()) {
-                override fun checkTransaction(stx: SignedTransaction) {
+            val signAndWaitForCommitFlow = object : SignAndWaitForCommitFlow(otherSideSession, SIGN_AND_WAIT.childProgressTracker()) {
+                override fun checkTxBeforeSigning(stx: SignedTransaction) {
                     // Verify that we know who all the participants in the transaction are
                     val states: Iterable<ContractState> = serviceHub.loadStates(stx.tx.inputs.toSet()).map { it.state.data } + stx.tx.outputs.map { it.data }
                     states.forEach { state ->
@@ -111,10 +111,8 @@ object TwoPartyTradeFlow {
                 }
             }
 
-            val txId = subFlow(signTransactionFlow).id
+            return subFlow(signAndWaitForCommitFlow)
             // DOCEND 5
-
-            return waitForLedgerCommit(txId)
         }
         // DOCEND 4
 
@@ -188,7 +186,7 @@ object TwoPartyTradeFlow {
 
             // Notarise and record the transaction.
             progressTracker.currentStep = RECORDING
-            return subFlow(FinalityFlow(twiceSignedTx))
+            return subFlow(FinalityFlow(twiceSignedTx, sellerSession))
         }
 
         @Suspendable

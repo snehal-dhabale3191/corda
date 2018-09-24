@@ -6,7 +6,7 @@ import co.paralleluniverse.fibers.Suspendable;
 import net.corda.core.contracts.ContractState;
 import net.corda.core.flows.*;
 import net.corda.core.transactions.SignedTransaction;
-import net.corda.core.utilities.ProgressTracker;
+import org.jetbrains.annotations.NotNull;
 
 import static net.corda.core.contracts.ContractsDSL.requireThat;
 
@@ -22,13 +22,9 @@ public class IOUFlowResponder extends FlowLogic<Void> {
     @Suspendable
     @Override
     public Void call() throws FlowException {
-        class SignTxFlow extends SignTransactionFlow {
-            private SignTxFlow(FlowSession otherPartySession, ProgressTracker progressTracker) {
-                super(otherPartySession, progressTracker);
-            }
-
+        subFlow(new SignAndWaitForCommitFlow(otherPartySession) {
             @Override
-            protected void checkTransaction(SignedTransaction stx) {
+            protected void checkTxBeforeSigning(@NotNull SignedTransaction stx) {
                 requireThat(require -> {
                     ContractState output = stx.getTx().getOutputs().get(0).getData();
                     require.using("This must be an IOU transaction.", output instanceof IOUState);
@@ -37,9 +33,7 @@ public class IOUFlowResponder extends FlowLogic<Void> {
                     return null;
                 });
             }
-        }
-
-        subFlow(new SignTxFlow(otherPartySession, SignTransactionFlow.Companion.tracker()));
+        });
 
         return null;
     }
